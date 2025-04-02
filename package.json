@@ -1,0 +1,13 @@
+{
+  "name": "markdown-blog",
+  "version": "1.0.0",
+  "description": "A minimal markdown-based blog",
+  "scripts": {
+    "build": "node build.js",
+    "serve": "npx http-server dist"
+  },
+  "dependencies": {
+    "marked": "^12.0.0",
+    "gray-matter": "^4.0.3"
+  }
+} 

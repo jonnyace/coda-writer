@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>My Notes</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <header>
+        <h1>My Notes</h1>
+        <p>A collection of thoughts, ideas, and learnings.</p>
+    </header>
+
+    <main>
+        <ul class="post-list" id="post-list">
+            <!-- Posts will be listed here -->
+        </ul>
+    </main>
+
+    <footer>
+        <p>Built with ❤️ using markdown and git</p>
+    </footer>
+
+    <script>
+        // Simple script to list posts
+        fetch('/posts/index.json')
+            .then(response => response.json())
+            .then(posts => {
+                const postList = document.getElementById('post-list');
+                posts.forEach(post => {
+                    const li = document.createElement('li');
+                    li.className = 'post-item';
+                    li.innerHTML = `
+                        <a href="/posts/${post.slug}.html">${post.title}</a>
+                        <div class="post-date">${new Date(post.date).toLocaleDateString()}</div>
+                    `;
+                    postList.appendChild(li);
+                });
+            })
+            .catch(error => console.error('Error loading posts:', error));
+    </script>
+</body>
+</html> 
