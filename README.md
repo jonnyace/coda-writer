@@ -12,19 +12,25 @@ A lightweight, self-contained blog system that uses markdown files and git for c
 - No JavaScript
 - Beautiful typography
 - Mobile-friendly
-
+''
+├── md/          # All markdown files (published or not)
+├── posts/       # Generated HTML files
+├── index.html   # Main index in root
+├── styles.css   # Styles in root
+├── build.sh     # Build script
+└── README.md
+''
 ## Getting Started
 
 1. Create a new post:
    - Create a new `.md` file in the `posts/` directory
-   - Add frontmatter at the top:
+   - Add frontmatter at the top with just the date:
      ```markdown
      ---
-     title: Your Post Title
      date: YYYY-MM-DD
      ---
      ```
-   - Write your content in markdown
+   - Write your content in markdown, starting with a title heading
 
 2. Generate the index:
    ```bash
@@ -45,17 +51,37 @@ A lightweight, self-contained blog system that uses markdown files and git for c
 
 ## Writing Posts
 
-Posts are written in markdown with frontmatter. Here's an example:
+Posts are written in markdown with a simple structure:
+
+1. **Frontmatter**: Each post starts with frontmatter (between `---` lines) that contains metadata:
+   ```markdown
+   ---
+   date: YYYY-MM-DD
+   ---
+   ```
+   The date is required and will be displayed with your post.
+
+2. **Title**: The first markdown heading (`#`) in your content will be used as your post's title. This title will appear:
+   - In the page header
+   - In the browser tab
+   - In the list of posts on the index page
+
+3. **Content**: After the title, write your post content using standard markdown features:
 
 ```markdown
 ---
-title: My First Post
-date: 2024-03-20
+date: 2024-04-02
 ---
 
-# My First Post
+# Welcome to My Blog
 
-This is the content of my post. You can use all standard markdown features:
+This is our first published post. It demonstrates the new blog structure with separate directories for:
+
+- Drafts
+- Published posts
+- Generated HTML
+
+
 
 - Lists
 - **Bold text**
@@ -68,8 +94,13 @@ This is the content of my post. You can use all standard markdown features:
 def hello():
     print("Hello, World!")
 ```
-```
 
+
+## How It Works
+1. Write posts in markdown
+2. Keep drafts in the `drafts/` directory
+3. Move to `posts/` when ready to publish
+4. Generated HTML goes to `html/` directory
 ## Customization
 
 - Edit `styles.css` to change the look and feel
