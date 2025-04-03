@@ -62,7 +62,6 @@ process_post() {
 </head>
 <body>
     <header>
-        <h1>$title</h1>
         <div class=\"post-date\">$date</div>
     </header>
     <main class=\"post-content\">" > "posts/$slug.html"
