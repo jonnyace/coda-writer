@@ -35,9 +35,9 @@ process_post() {
     
     echo "Processing $file..."
     
-    # Extract date from frontmatter and title from first markdown heading
+    # Extract date and title from frontmatter
     date=$(grep "^date:" "$file" | sed 's/^date: *//')
-    title=$(grep "^# " "$file" | head -n 1 | sed 's/^# *//')
+    title=$(grep "^title:" "$file" | sed 's/^title: *//')
     slug=$(basename "$file" .md)
     
     echo "Title: $title"
@@ -69,7 +69,7 @@ process_post() {
     # Convert markdown to HTML
     echo "Converting markdown to HTML..."
     awk '
-    BEGIN { p=0; in_code=0 }
+    BEGIN { p=0; in_code=0; first_heading=1 }
     /^---$/ { p++; next }
     p==2 {
         if ($0 ~ /^```/) {
@@ -84,6 +84,10 @@ process_post() {
         }
         if (in_code == 1) {
             print $0
+            next
+        }
+        if ($0 ~ /^# / && first_heading == 1) {
+            first_heading = 0
             next
         }
         if ($0 ~ /^# /) {
