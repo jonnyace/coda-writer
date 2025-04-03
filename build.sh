@@ -3,6 +3,18 @@
 # Enable error handling
 set -e
 
+# Check if pandoc is installed, if not install it
+if ! command -v pandoc &> /dev/null; then
+    echo "Installing pandoc..."
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # For Linux (Cloudflare Pages)
+        apt-get update && apt-get install -y pandoc
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        # For macOS
+        brew install pandoc
+    fi
+fi
+
 # Create necessary directories if they don't exist
 mkdir -p posts
 
@@ -70,7 +82,13 @@ process_post() {
     # Skip frontmatter and convert the rest to HTML
     echo "Converting markdown to HTML..."
     # Extract content after frontmatter and convert to HTML using pandoc
+    echo "Debug: Current directory: $(pwd)"
+    echo "Debug: Content of $file:"
+    cat "$file"
+    echo "Debug: Running pandoc conversion..."
     awk 'BEGIN{p=0} /^---$/{p++; next} p==2{print}' "$file" | pandoc -f markdown -t html >> "posts/$slug.html"
+    echo "Debug: Generated HTML content:"
+    cat "posts/$slug.html"
     
     echo "    </main>
     <footer>
