@@ -3,18 +3,6 @@
 # Enable error handling
 set -e
 
-# Check if pandoc is installed, if not install it
-if ! command -v pandoc &> /dev/null; then
-    echo "Installing pandoc..."
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        # For Linux (Cloudflare Pages)
-        apt-get update && apt-get install -y pandoc
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        # For macOS
-        brew install pandoc
-    fi
-fi
-
 # Create necessary directories if they don't exist
 mkdir -p posts
 
@@ -79,16 +67,64 @@ process_post() {
     </header>
     <main class=\"post-content\">" > "posts/$slug.html"
     
-    # Skip frontmatter and convert the rest to HTML
+    # Convert markdown to HTML
     echo "Converting markdown to HTML..."
-    # Extract content after frontmatter and convert to HTML using pandoc
-    echo "Debug: Current directory: $(pwd)"
-    echo "Debug: Content of $file:"
-    cat "$file"
-    echo "Debug: Running pandoc conversion..."
-    awk 'BEGIN{p=0} /^---$/{p++; next} p==2{print}' "$file" | pandoc -f markdown -t html >> "posts/$slug.html"
-    echo "Debug: Generated HTML content:"
-    cat "posts/$slug.html"
+    awk '
+    BEGIN { p=0; in_code=0 }
+    /^---$/ { p++; next }
+    p==2 {
+        if ($0 ~ /^```/) {
+            if (in_code == 0) {
+                print "<pre><code>"
+                in_code = 1
+            } else {
+                print "</code></pre>"
+                in_code = 0
+            }
+            next
+        }
+        if (in_code == 1) {
+            print $0
+            next
+        }
+        if ($0 ~ /^# /) {
+            gsub(/^# /, "<h1>")
+            print $0 "</h1>"
+            next
+        }
+        if ($0 ~ /^## /) {
+            gsub(/^## /, "<h2>")
+            print $0 "</h2>"
+            next
+        }
+        if ($0 ~ /^### /) {
+            gsub(/^### /, "<h3>")
+            print $0 "</h3>"
+            next
+        }
+        if ($0 ~ /^\* /) {
+            gsub(/^\* /, "<li>")
+            print $0 "</li>"
+            next
+        }
+        if ($0 ~ /^- /) {
+            gsub(/^- /, "<li>")
+            print $0 "</li>"
+            next
+        }
+        if ($0 ~ /^[0-9]+\. /) {
+            gsub(/^[0-9]+\. /, "<li>")
+            print $0 "</li>"
+            next
+        }
+        if ($0 ~ /^$/) {
+            print "<p></p>"
+            next
+        }
+        if ($0 !~ /^$/) {
+            print "<p>" $0 "</p>"
+        }
+    }' "$file" >> "posts/$slug.html"
     
     echo "    </main>
     <footer>
