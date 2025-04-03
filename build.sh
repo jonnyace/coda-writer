@@ -58,7 +58,7 @@ process_post() {
     <meta charset=\"utf-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
     <title>$title</title>
-    <link rel=\"stylesheet\" href=\"/styles.css\">
+    <link rel=\"stylesheet\" href=\"../styles.css\">
 </head>
 <body>
     <header>
@@ -69,9 +69,8 @@ process_post() {
     
     # Skip frontmatter and convert the rest to HTML
     echo "Converting markdown to HTML..."
-    awk 'BEGIN{p=0} /^---$/{p++; next} p==2{print}' "$file" | while IFS= read -r line; do
-        echo "<p>$line</p>" >> "posts/$slug.html"
-    done
+    # Extract content after frontmatter and convert to HTML using pandoc
+    awk 'BEGIN{p=0} /^---$/{p++; next} p==2{print}' "$file" | pandoc -f markdown -t html >> "posts/$slug.html"
     
     echo "    </main>
     <footer>
