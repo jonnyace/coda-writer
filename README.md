@@ -23,14 +23,15 @@ A lightweight, self-contained blog system that uses markdown files and git for c
 ## Getting Started
 
 1. Create a new post:
-   - Create a new `.md` file in the `posts/` directory
-   - Add frontmatter at the top with just the date:
+   - Create a new `.md` file in the `md/` directory
+   - Add frontmatter at the top with title and date:
      ```markdown
      ---
+     title: Your Post Title
      date: YYYY-MM-DD
      ---
      ```
-   - Write your content in markdown, starting with a title heading
+   - Write your content in markdown below the frontmatter
 
 2. Generate the index:
    ```bash
