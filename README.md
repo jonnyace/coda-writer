@@ -12,14 +12,14 @@ A lightweight, self-contained blog system that uses markdown files and git for c
 - No JavaScript
 - Beautiful typography
 - Mobile-friendly
-''
+'''
 ├── md/          # All markdown files (published or not)
 ├── posts/       # Generated HTML files
 ├── index.html   # Main index in root
 ├── styles.css   # Styles in root
 ├── build.sh     # Build script
 └── README.md
-''
+'''
 ## Getting Started
 
 1. Create a new post:
