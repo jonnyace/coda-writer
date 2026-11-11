@@ -1,0 +1,20 @@
+[package]
+name = "coda-writer"
+version = "0.1.0"
+description = "A notes app that keeps every note as a markdown file"
+edition = "2024"
+publish = false
+
+[lib]
+name = "coda_writer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4" }
+
+[dependencies]
+coda-core = { path = "../../crates/core" }
+notify-debouncer-full = "0.7.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2.12.5" }
+toml = "1.2.1"

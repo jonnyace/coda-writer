@@ -1,113 +1,61 @@
-# Minimal Markdown Blog
+# Coda Writer
 
-A lightweight, self-contained blog system that uses markdown files and git for content management. No dependencies required!
+A notes app in the spirit of Apple Notes, built for [Omarchy](https://omarchy.org) (Linux first, macOS later). Every note is a plain markdown file in a folder you own. Notes you flag can be published to the blog in `site/`.
 
-## Features
+```
+app/          Desktop app: Svelte UI in src/, Tauri shell in src-tauri/
+crates/core/  Note storage (markdown files, folders, trash). No GUI code.
+site/         The blog: build.sh turns site/md/*.md into static HTML
+docs/         Plan and design notes
+```
 
-- Write posts in markdown
-- No database required
-- No dependencies
-- Version control for all content
-- Fast loading times
-- No JavaScript
-- Beautiful typography
-- Mobile-friendly
- ```
-├── md/          # All markdown files (published or not)
-├── posts/       # Generated HTML files
-├── index.html   # Main index in root
-├── styles.css   # Styles in root
-├── build.sh     # Build script
-└── README.md
- ```
-## Getting Started
+See [docs/plan.md](docs/plan.md) for the roadmap and [site/README.md](site/README.md) for the blog.
 
-1. Create a new post:
-   - Create a new `.md` file in the `md/` directory
-   - Add frontmatter at the top with title and date:
-     ```markdown
-     ---
-     title: Your Post Title
-     date: YYYY-MM-DD
-     ---
-     ```
-   - Write your content in markdown below the frontmatter
+## Run the app
 
-2. Generate the index:
-   ```bash
-   ./build.sh
-   ```
+On Arch / Omarchy:
 
-3. Preview locally:
-   ```bash
-   python3 -m http.server 8000
-   ```
+```bash
+sudo pacman -S --needed webkit2gtk-4.1 base-devel rust nodejs npm
+cd app
+npm install
+npm run tauri dev      # develop
+npm run tauri build    # release binary in ../target/release/coda-writer
+```
 
-## Deployment
+If the window is blank on an NVIDIA GPU, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 
-1. Push your content to GitHub
-2. Connect your repository to Cloudflare Pages
-3. Set build command to: `./build.sh`
-4. Set output directory to: `.`
+## Where notes live
 
-## Writing Posts
+Notes are read from `~/Notes`. To use another folder, create `~/.config/coda-writer/config.toml`:
 
-Posts are written in markdown with a simple structure:
+```toml
+notes_dir = "~/Documents/notes"
+```
 
-1. **Frontmatter**: Each post starts with frontmatter (between `---` lines) that contains metadata:
-   ```markdown
-   ---
-   date: YYYY-MM-DD
-   ---
-   ```
-   The date is required and will be displayed with your post.
-
-2. **Title**: The first markdown heading (`#`) in your content will be used as your post's title. This title will appear:
-   - In the page header
-   - In the browser tab
-   - In the list of posts on the index page
-
-3. **Content**: After the title, write your post content using standard markdown features:
+Each note is a `.md` file with a short header:
 
 ```markdown
 ---
-date: 2024-04-02
+id: 0193a1c9-2c99-70b6-bfdc-917a872e6e2e
+title: Groceries
+date: 2026-11-08
+updated: 2026-11-08T15:00:00Z
+pinned: true
 ---
 
-# Welcome to My Blog
-
-This is our first published post. It demonstrates the new blog structure with separate directories for:
-
-- Drafts
-- Published posts
-- Generated HTML
-
-
-
-- Lists
-- **Bold text**
-- *Italic text*
-- [Links](https://example.com)
-
-## Code blocks
-
-```python
-def hello():
-    print("Hello, World!")
+- [ ] eggs
 ```
 
+- The file is named after the title and renamed when the title changes. The `id` never changes.
+- Subfolders are folders in the app. Hidden files and folders are ignored.
+- Deleting a note moves it to `.trash/` inside the notes folder.
+- You can edit the files in any other editor while the app is open; it picks up the changes.
+- Header lines the app does not know (tags, aliases, anything else) are left exactly as they are.
 
-## How It Works
-1. Write posts in markdown
-2. Keep drafts in the `drafts/` directory
-3. Move to `posts/` when ready to publish
-4. Generated HTML goes to `html/` directory
-## Customization
+## Test
 
-- Edit `styles.css` to change the look and feel
-- Modify `build.sh` to change how the index is generated
-- Update `index.html` to change the site structure
-
-## License
-
-MIT 
+```bash
+cargo test -p coda-core        # storage tests, no GUI libraries needed
+cd app && npm run check        # type-check the UI
+```
