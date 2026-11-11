@@ -2,6 +2,7 @@
 //! folder so edits made in other programs show up live.
 
 mod config;
+mod publish;
 
 use std::path::Path;
 use std::time::Duration;
@@ -9,6 +10,8 @@ use std::time::Duration;
 use coda_core::{FsStore, Note, NoteSummary};
 use notify_debouncer_full::notify::{EventKind, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, new_debouncer};
+use publish::Server;
+use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
 /// Event sent to the UI when anything in the notes folder changes.
@@ -59,13 +62,80 @@ fn set_note_flag(store: State<'_, FsStore>, path: String, key: String, value: bo
 }
 
 #[tauri::command(async)]
-fn trash_note(store: State<'_, FsStore>, path: String) -> CommandResult<()> {
+fn trash_note(store: State<'_, FsStore>, publisher: State<'_, Publisher>, path: String) -> CommandResult<()> {
+    // A trashed note must not stay live on the blog. If it cannot be taken
+    // down, keep the note so the user can see it is still published.
+    let note = store.read(&path).map_err(err)?.summary;
+    if let (true, Some(id), Some(server)) = (note.published, note.id, publisher.0.as_ref()) {
+        server.remove(&id)?;
+        store.set_flag(&path, "published", false).map_err(err)?;
+    }
     store.trash(&path).map_err(err)
 }
 
 #[tauri::command(async)]
 fn create_folder(store: State<'_, FsStore>, name: String) -> CommandResult<String> {
     store.create_folder(&name).map_err(err)
+}
+
+/// The blog server from config.toml, if one is set up.
+struct Publisher(Option<Server>);
+
+const NO_SERVER: &str =
+    "To publish, add a [server] section with url and token to ~/.config/coda-writer/config.toml";
+
+#[derive(Serialize)]
+struct PublishResult {
+    note: NoteSummary,
+    /// Public address of the post; `None` after unpublishing.
+    url: Option<String>,
+}
+
+/// Publish a note to the blog, or take it down. The `published` flag in the
+/// file only changes if the server agreed, so the file never claims a state
+/// the blog is not in.
+#[tauri::command(async)]
+fn set_published(
+    store: State<'_, FsStore>,
+    publisher: State<'_, Publisher>,
+    path: String,
+    value: bool,
+) -> CommandResult<PublishResult> {
+    let server = publisher.0.as_ref().ok_or(NO_SERVER)?;
+    if value {
+        // Setting the flag also gives a hand-written note its id.
+        store.set_flag(&path, "published", true).map_err(err)?;
+        let note = store.read(&path).map_err(err)?;
+        match server.push(&note) {
+            Ok(url) => Ok(PublishResult { note: note.summary, url: Some(url) }),
+            Err(e) => {
+                store.set_flag(&path, "published", false).map_err(err)?;
+                Err(e)
+            }
+        }
+    } else {
+        if let Some(id) = store.read(&path).map_err(err)?.summary.id {
+            server.remove(&id)?;
+        }
+        let note = store.set_flag(&path, "published", false).map_err(err)?;
+        Ok(PublishResult { note, url: None })
+    }
+}
+
+/// Send the latest text of an already-published note to the blog. The UI
+/// calls this after each save; it does nothing for private notes.
+#[tauri::command(async)]
+fn push_published(
+    store: State<'_, FsStore>,
+    publisher: State<'_, Publisher>,
+    path: String,
+) -> CommandResult<Option<String>> {
+    let note = store.read(&path).map_err(err)?;
+    if !note.summary.published {
+        return Ok(None);
+    }
+    let server = publisher.0.as_ref().ok_or(NO_SERVER)?;
+    server.push(&note).map(Some)
 }
 
 /// Hidden files are our own temp files, `.trash/` and things like `.git/`;
@@ -81,7 +151,8 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let paths = app.path();
-            let notes_dir = config::Config::load(&paths.config_dir()?).notes_dir(&paths.home_dir()?);
+            let config = config::Config::load(&paths.config_dir()?);
+            let notes_dir = config.notes_dir(&paths.home_dir()?);
             let store = FsStore::open(&notes_dir)
                 .map_err(|e| format!("cannot open notes folder {}: {e}", notes_dir.display()))?;
 
@@ -100,6 +171,7 @@ pub fn run() {
             watcher.watch(store.root(), RecursiveMode::Recursive)?;
 
             app.manage(store);
+            app.manage(Publisher(config.server));
             // Dropping the watcher stops it, so it lives as long as the app.
             app.manage(watcher);
             Ok(())
@@ -114,6 +186,8 @@ pub fn run() {
             set_note_flag,
             trash_note,
             create_folder,
+            set_published,
+            push_published,
         ])
         .run(tauri::generate_context!())
         .expect("error while running coda-writer");
