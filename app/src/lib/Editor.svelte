@@ -11,9 +11,11 @@
     body: string
     /** Bump to replace the editor's content (opening a note, external edit). */
     loadToken: number
+    /** `false` shows the note read-only (trashed notes). */
+    editable?: boolean
     onchange: (markdown: string) => void
   }
-  let { body, loadToken, onchange }: Props = $props()
+  let { body, loadToken, editable = true, onchange }: Props = $props()
 
   let element: HTMLDivElement
   let editor: Editor | undefined
@@ -33,6 +35,7 @@
       // not, so opening a file never rewrites it.
       onUpdate: ({ editor }) => onchange(editor.getMarkdown()),
     })
+    editor.setEditable(editable, false)
     load()
     return () => editor?.destroy()
   })
@@ -46,6 +49,10 @@
   $effect(() => {
     void loadToken
     load()
+  })
+
+  $effect(() => {
+    editor?.setEditable(editable, false)
   })
 
   export function focus() {

@@ -25,6 +25,8 @@ pub enum Error {
     InvalidPath(String),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("{0} already exists")]
+    AlreadyExists(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -210,17 +212,110 @@ impl FsStore {
     }
 
     /// Move a note into `.trash/` inside the notes folder. Nothing is ever
-    /// deleted outright, so a mis-click is recoverable from a file manager.
+    /// deleted outright, so a mis-click is recoverable. The trash mirrors the
+    /// folder layout (`Work/a.md` goes to `.trash/Work/a.md`), which is how
+    /// `restore` knows where a note came from without editing the note.
     pub fn trash(&self, path: &str) -> Result<()> {
         let file = self.resolve_note(path)?;
         if !file.is_file() {
             return Err(Error::NotFound(path.to_string()));
         }
-        let trash = self.root.join(TRASH_DIR);
-        fs::create_dir_all(&trash)?;
+        let folder = file.parent().and_then(|d| d.strip_prefix(&self.root).ok()).unwrap_or(Path::new(""));
+        let dest = self.trash_dir().join(folder);
+        fs::create_dir_all(&dest)?;
         let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
-        fs::rename(&file, unique_path(&trash, stem, "md", None))?;
+        fs::rename(&file, unique_path(&dest, stem, "md", None))?;
         Ok(())
+    }
+
+    /// Notes in the trash, most recently edited first. Their `path` is
+    /// relative to the trash and `folder` is where they would be restored.
+    pub fn trashed(&self) -> Result<Vec<NoteSummary>> {
+        let trash = self.trash_dir();
+        let mut files = Vec::new();
+        if trash.is_dir() {
+            self.collect_notes(&trash, true, &mut files)?;
+        }
+        let mut notes: Vec<NoteSummary> = files
+            .iter()
+            .filter_map(|file| self.load_from(&trash, file).ok())
+            .map(|note| note.summary)
+            .collect();
+        notes.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.path.cmp(&b.path)));
+        Ok(notes)
+    }
+
+    pub fn read_trashed(&self, path: &str) -> Result<Note> {
+        let trash = self.trash_dir();
+        self.load_from(&trash, &self.resolve_note_in(&trash, path)?)
+    }
+
+    /// Put a trashed note back in the folder it came from, recreating the
+    /// folder if it has since been deleted.
+    pub fn restore(&self, path: &str) -> Result<NoteSummary> {
+        let trash = self.trash_dir();
+        let file = self.resolve_note_in(&trash, path)?;
+        if !file.is_file() {
+            return Err(Error::NotFound(path.to_string()));
+        }
+        let folder = file.parent().and_then(|d| d.strip_prefix(&trash).ok()).unwrap_or(Path::new(""));
+        let dest = self.root.join(folder);
+        fs::create_dir_all(&dest)?;
+        let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
+        let target = unique_path(&dest, stem, "md", None);
+        fs::rename(&file, &target)?;
+        if let Some(parent) = file.parent() {
+            remove_empty_dirs(parent, &trash);
+        }
+        Ok(self.load(&target)?.summary)
+    }
+
+    /// Move a note to another folder (`""` is the top level).
+    pub fn move_note(&self, path: &str, folder: &str) -> Result<NoteSummary> {
+        let file = self.resolve_note(path)?;
+        if !file.is_file() {
+            return Err(Error::NotFound(path.to_string()));
+        }
+        let dest = self.resolve_dir(folder)?;
+        if file.parent() == Some(dest.as_path()) {
+            return Ok(self.load(&file)?.summary);
+        }
+        let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("note");
+        let target = unique_path(&dest, stem, "md", None);
+        fs::rename(&file, &target)?;
+        Ok(self.load(&target)?.summary)
+    }
+
+    /// Give a folder a new name in place. Returns its new path.
+    pub fn rename_folder(&self, folder: &str, new_name: &str) -> Result<String> {
+        let dir = self.resolve_folder(folder)?;
+        let name = clean_relative(new_name.trim())?;
+        if name.components().count() != 1 {
+            return Err(Error::InvalidPath(format!("\"{new_name}\" is not a folder name")));
+        }
+        let target = dir.parent().unwrap_or(&self.root).join(&name);
+        if target == dir {
+            return Ok(folder.to_string());
+        }
+        if target.exists() {
+            return Err(Error::AlreadyExists(name.display().to_string()));
+        }
+        fs::rename(&dir, &target)?;
+        Ok(to_slash(target.strip_prefix(&self.root).unwrap_or(&target)))
+    }
+
+    /// Move every note in a folder (and its subfolders) to the trash, then
+    /// remove the folder. Returns `false` if the folder had to stay because
+    /// it still holds files that are not notes.
+    pub fn delete_folder(&self, folder: &str) -> Result<bool> {
+        let dir = self.resolve_folder(folder)?;
+        let mut files = Vec::new();
+        self.collect_notes(&dir, true, &mut files)?;
+        for file in &files {
+            self.trash(&to_slash(file.strip_prefix(&self.root).unwrap_or(file)))?;
+        }
+        remove_tree_if_empty(&dir);
+        Ok(!dir.exists())
     }
 
     pub fn create_folder(&self, folder: &str) -> Result<String> {
@@ -232,8 +327,18 @@ impl FsStore {
         Ok(to_slash(&rel))
     }
 
+    fn trash_dir(&self) -> PathBuf {
+        self.root.join(TRASH_DIR)
+    }
+
     fn load(&self, file: &Path) -> Result<Note> {
-        let rel = file.strip_prefix(&self.root).unwrap_or(file);
+        self.load_from(&self.root, file)
+    }
+
+    /// Read a note, reporting its path relative to `base` (the notes root or
+    /// the trash).
+    fn load_from(&self, base: &Path, file: &Path) -> Result<Note> {
+        let rel = file.strip_prefix(base).unwrap_or(file);
         let rel_str = to_slash(rel);
         let doc = Document::parse(&read_file(file, &rel_str)?);
         let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
@@ -279,12 +384,24 @@ impl FsStore {
         Ok(dir)
     }
 
+    /// A real folder below the root; the root itself cannot be renamed or deleted.
+    fn resolve_folder(&self, folder: &str) -> Result<PathBuf> {
+        if clean_relative(folder)?.as_os_str().is_empty() {
+            return Err(Error::InvalidPath("the top-level folder cannot be changed".into()));
+        }
+        self.resolve_dir(folder)
+    }
+
     fn resolve_note(&self, path: &str) -> Result<PathBuf> {
+        self.resolve_note_in(&self.root, path)
+    }
+
+    fn resolve_note_in(&self, base: &Path, path: &str) -> Result<PathBuf> {
         let rel = clean_relative(path)?;
         if rel.extension().and_then(|e| e.to_str()) != Some("md") {
             return Err(Error::InvalidPath(format!("{path} is not a .md file")));
         }
-        Ok(self.root.join(rel))
+        Ok(base.join(rel))
     }
 
     fn walk_dirs(&self, dir: &Path, out: &mut Vec<String>) -> Result<()> {
@@ -379,6 +496,30 @@ fn unique_path(dir: &Path, stem: &str, ext: &str, own: Option<&Path>) -> PathBuf
         }
         n += 1;
     }
+}
+
+/// Remove `dir` and then each parent while they are empty, stopping at `stop`.
+fn remove_empty_dirs(dir: &Path, stop: &Path) {
+    let mut dir = dir;
+    // `remove_dir` refuses to delete a directory that still has entries.
+    while dir != stop && dir.starts_with(stop) && fs::remove_dir(dir).is_ok() {
+        match dir.parent() {
+            Some(parent) => dir = parent,
+            None => break,
+        }
+    }
+}
+
+/// Remove a directory tree, but only the parts with no files left in them.
+fn remove_tree_if_empty(dir: &Path) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                remove_tree_if_empty(&entry.path());
+            }
+        }
+    }
+    let _ = fs::remove_dir(dir);
 }
 
 fn new_id() -> String {
@@ -607,6 +748,82 @@ mod tests {
         assert!(store.folders().unwrap().is_empty());
         assert!(store.root().join(".trash/untitled.md").exists());
         assert!(matches!(store.trash(&note.path), Err(Error::NotFound(_))));
+    }
+
+    #[test]
+    fn a_trashed_note_can_be_read_and_restored_to_its_folder() {
+        let (_dir, store) = store();
+        store.create_folder("Work/Clients").unwrap();
+        let note = store.create("Work/Clients").unwrap();
+        let note = store.save(&note.path, "Acme", "terms").unwrap();
+        store.trash(&note.path).unwrap();
+
+        let trashed = store.trashed().unwrap();
+        assert_eq!(trashed.len(), 1);
+        assert_eq!((trashed[0].path.as_str(), trashed[0].folder.as_str()), ("Work/Clients/acme.md", "Work/Clients"));
+        assert_eq!(store.read_trashed(&trashed[0].path).unwrap().body, "terms");
+
+        // The original folder is gone by the time the note is restored.
+        assert!(store.delete_folder("Work").unwrap());
+        let restored = store.restore(&trashed[0].path).unwrap();
+        assert_eq!(restored.path, "Work/Clients/acme.md");
+        assert_eq!(restored.id, note.id);
+        assert!(store.trashed().unwrap().is_empty());
+        assert!(!store.root().join(".trash/Work").exists(), "empty trash folders are cleaned up");
+        assert!(matches!(store.restore("../acme.md"), Err(Error::InvalidPath(_))));
+    }
+
+    #[test]
+    fn moving_a_note_keeps_its_id_and_never_overwrites() {
+        let (_dir, store) = store();
+        store.create_folder("Work").unwrap();
+        let a = store.create("").unwrap();
+        let a = store.save(&a.path, "Ideas", "mine").unwrap();
+        let b = store.create("Work").unwrap();
+        store.save(&b.path, "Ideas", "theirs").unwrap();
+
+        let moved = store.move_note(&a.path, "Work").unwrap();
+        assert_eq!(moved.path, "Work/ideas-2.md");
+        assert_eq!(moved.id, a.id);
+        assert_eq!(store.read("Work/ideas.md").unwrap().body, "theirs");
+        assert_eq!(store.move_note(&moved.path, "Work").unwrap().path, moved.path, "moving to the same folder is a no-op");
+        assert_eq!(store.move_note(&moved.path, "").unwrap().path, "ideas-2.md");
+        assert!(matches!(store.move_note("ideas-2.md", "Missing"), Err(Error::NotFound(_))));
+    }
+
+    #[test]
+    fn folders_can_be_renamed_but_not_onto_each_other() {
+        let (_dir, store) = store();
+        store.create_folder("Work/Clients").unwrap();
+        store.create_folder("Home").unwrap();
+        store.create("Work/Clients").unwrap();
+
+        assert_eq!(store.rename_folder("Work/Clients", "Customers").unwrap(), "Work/Customers");
+        assert_eq!(store.notes(Some("Work/Customers")).unwrap().len(), 1);
+        assert!(matches!(store.rename_folder("Work", "Home"), Err(Error::AlreadyExists(_))));
+        assert!(matches!(store.rename_folder("Work", "a/b"), Err(Error::InvalidPath(_))));
+        assert!(matches!(store.rename_folder("Work", "../x"), Err(Error::InvalidPath(_))));
+        assert!(matches!(store.rename_folder("", "x"), Err(Error::InvalidPath(_))));
+    }
+
+    #[test]
+    fn deleting_a_folder_trashes_its_notes_and_spares_other_files() {
+        let (_dir, store) = store();
+        store.create_folder("Work/Clients").unwrap();
+        store.create_folder("Photos").unwrap();
+        store.create("Work").unwrap();
+        store.create("Work/Clients").unwrap();
+        let keep = store.create("").unwrap();
+        fs::write(store.root().join("Photos/cat.jpg"), "x").unwrap();
+        store.create("Photos").unwrap();
+
+        assert!(store.delete_folder("Work").unwrap());
+        assert!(!store.delete_folder("Photos").unwrap(), "the photo is not a note, so the folder stays");
+        assert!(store.root().join("Photos/cat.jpg").exists());
+        assert_eq!(store.folders().unwrap(), ["Photos"]);
+        assert_eq!(store.notes(None).unwrap().into_iter().map(|n| n.path).collect::<Vec<_>>(), [keep.path]);
+        assert_eq!(store.trashed().unwrap().len(), 3);
+        assert!(matches!(store.delete_folder(""), Err(Error::InvalidPath(_))));
     }
 
     #[test]
