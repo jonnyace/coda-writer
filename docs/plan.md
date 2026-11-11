@@ -46,15 +46,19 @@ Still open: how sync conflicts are shown to the user, and how one deployment rou
 Built in this order:
 
 1. **Skeleton** (done). Three panes, folders, autosave, pin, trash, live reload of outside edits.
-2. **Server and publish.** The deploy-anywhere server renders published notes as a blog with an RSS feed. The app gets a Publish button that pushes the note to the server and keeps it updated on save.
+2. **Server and publish** (done). The deploy-anywhere server renders published notes as a blog with an RSS feed. The app gets a Publish button that pushes the note to the server and keeps it updated on save.
 3. **Apple Notes basics.** Full-text search (SQLite FTS5 as a rebuildable cache), move notes between folders, rename and delete folders, a view of the trash with restore, images pasted into `_attachments/`, tags, a command palette.
 4. **Omarchy polish.** Follow the active Omarchy theme and re-theme when it changes, quick-capture window with a Hyprland rule and keybinding, AUR package and `.desktop` entry.
 5. **Subscriptions.** Reader sign-in, Stripe Checkout with the writer's own keys, subscriber-only posts.
 6. **Sync and accounts.** Sync the whole notes folder through the server, writer accounts, many writers per deployment, Stripe Connect for the hosted service.
 7. **macOS.** Native menu bar, signed and notarized `.dmg`, global capture hotkey.
 
-## Known gaps after phase 1
+## Known gaps
 
 - The notes folder can only be changed in the config file, not in the app.
 - Notes are sorted by the `updated` header, so a note edited only outside the app keeps its old position until the app saves it.
+- The server token sits in plain text in `config.toml`; it should move to the system keyring.
+- If the blog is unreachable when a published note is saved, the update is retried only on the next save.
+- The published address is shown as text; it does not open in the browser yet.
+- The server has not been deployed to a real Cloudflare account, only run against wrangler's local D1.
 - Not yet run on a real Omarchy desktop or on macOS; verified by compiling and driving the app in an Arch Linux container.

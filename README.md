@@ -34,6 +34,16 @@ Notes are read from `~/Notes`. To use another folder, create `~/.config/coda-wri
 notes_dir = "~/Documents/notes"
 ```
 
+To publish notes to a blog, deploy the server ([server/README.md](server/README.md)) and add its address and token:
+
+```toml
+[server]
+url = "https://your-blog.example.com"
+token = "the CODA_TOKEN value"
+```
+
+Then use **Publish** on any note. Only published notes are sent to the server, and editing one updates the blog as you type.
+
 Each note is a `.md` file with a short header:
 
 ```markdown
