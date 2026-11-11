@@ -199,11 +199,11 @@ impl FsStore {
         let doc = Document::parse(&read_file(file, &rel_str)?);
         let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
-        let title = match doc.get("title") {
-            Some(title) => title,
-            // Notes written outside the app often have no header at all.
-            None => first_heading(&doc.body).unwrap_or_else(|| stem.to_string()),
-        };
+        // Notes written outside the app often have no header at all; their
+        // first heading is the title, so the preview should not repeat it.
+        let heading = if doc.has("title") { None } else { first_heading(&doc.body) };
+        let preview = snippet(&doc.body, heading.is_some());
+        let title = doc.get("title").or(heading).unwrap_or_else(|| stem.to_string());
         let updated = doc
             .get("updated")
             .and_then(|u| DateTime::parse_from_rfc3339(&u).ok())
@@ -217,7 +217,7 @@ impl FsStore {
                 path: rel_str,
                 id: doc.get("id").filter(|id| !id.is_empty()),
                 title,
-                snippet: snippet(&doc.body),
+                snippet: preview,
                 updated: updated.to_rfc3339_opts(SecondsFormat::Secs, true),
                 pinned: doc.get_bool("pinned"),
                 published: doc.get_bool("published"),
@@ -367,9 +367,13 @@ fn first_heading(body: &str) -> Option<String> {
 }
 
 /// A one-line plain-text preview of the body for the note list.
-fn snippet(body: &str) -> String {
+fn snippet(body: &str, mut skip_heading: bool) -> String {
     let mut out = String::new();
     for line in body.lines() {
+        if skip_heading && line.starts_with("# ") {
+            skip_heading = false;
+            continue;
+        }
         let line = line
             .trim()
             .trim_start_matches(['#', '>', '-', '*', '+', ' '])
@@ -451,6 +455,7 @@ mod tests {
         let notes = store.notes(None).unwrap();
         let plain = notes.iter().find(|n| n.path == "plain.md").unwrap();
         assert_eq!(plain.title, "From Vim");
+        assert_eq!(plain.snippet, "hello");
         assert_eq!(plain.id, None);
 
         store.save("tagged.md", "Tagged", "body 2").unwrap();
