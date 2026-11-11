@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "coda-writer",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  // No database_id: wrangler creates the D1 database on first deploy.
+  "d1_databases": [{ "binding": "DB", "database_name": "coda-writer" }],
+  "vars": {
+    "SITE_TITLE": "Notes",
+    "SITE_DESCRIPTION": ""
+  },
+  "observability": { "enabled": true }
+}
