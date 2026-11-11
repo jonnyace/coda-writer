@@ -47,8 +47,9 @@ A lightweight, self-contained blog system that uses markdown files and git for c
 
 1. Push your content to GitHub
 2. Connect your repository to Cloudflare Pages
-3. Set build command to: `./build.sh`
-4. Set output directory to: `.`
+3. Set root directory to: `site`
+4. Set build command to: `./build.sh`
+5. Set output directory to: `.`
 
 ## Writing Posts
 
