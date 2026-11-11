@@ -13,6 +13,7 @@
   let title = $state('')
   let loadToken = $state(0)
   let error = $state('')
+  let notice = $state('')
   let newFolderName = $state<string | null>(null)
 
   let titleInput = $state<HTMLInputElement>()
@@ -65,6 +66,7 @@
       current = await api.read(path)
       title = current.title
       loadToken += 1
+      notice = ''
     })
   }
 
@@ -101,6 +103,10 @@
         error = ''
         if (current === note) current = { ...summary, body }
         notes = await api.notes(folder)
+        if (summary.published) {
+          // The note is safe on disk either way; only the blog copy is stale.
+          api.pushPublished(summary.path).catch((e) => (error = `Saved, but the blog was not updated: ${e}`))
+        }
       } catch (e) {
         // Keep the edit queued so the next keystroke or blur retries it.
         dirty = true
@@ -138,6 +144,17 @@
     const note = current
     const summary = await guard(() => api.setPinned(note.path, !note.pinned))
     if (summary && current === note) current = { ...summary, body: note.body }
+    await refresh()
+  }
+
+  async function togglePublished() {
+    if (!current) return
+    await flush()
+    const note = current
+    const result = await guard(() => api.setPublished(note.path, !note.published))
+    if (!result) return
+    if (current === note) current = { ...result.note, body: note.body }
+    notice = result.url ? `Published at ${result.url}` : 'Unpublished'
     await refresh()
   }
 
@@ -268,9 +285,14 @@
   <main class="page">
     {#if current}
       <div class="tools">
-        <span class="path" title={current.path}>{current.path}</span>
+        <span class="path" title={current.path}>
+          {current.path}{#if current.published}<span class="published">Published</span>{/if}
+        </span>
         <button class="quiet" aria-pressed={current.pinned} onclick={togglePin}>
           {current.pinned ? 'Unpin' : 'Pin'}
+        </button>
+        <button class="quiet" aria-pressed={current.published} onclick={togglePublished}>
+          {current.published ? 'Unpublish' : 'Publish'}
         </button>
         <button class="quiet" onclick={trash}>Move to trash</button>
       </div>
@@ -291,6 +313,8 @@
     {/if}
     {#if error}
       <p class="error" role="alert">{error}</p>
+    {:else if notice}
+      <p class="error notice" role="status">{notice}</p>
     {/if}
   </main>
 </div>
