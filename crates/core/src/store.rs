@@ -40,6 +40,8 @@ pub struct NoteSummary {
     pub id: Option<String>,
     pub title: String,
     pub snippet: String,
+    /// Day the note was written, `YYYY-MM-DD`. Shown on the published post.
+    pub date: String,
     /// RFC 3339 timestamp of the last edit.
     pub updated: String,
     pub pinned: bool,
@@ -210,6 +212,11 @@ impl FsStore {
             .map(|u| u.with_timezone(&Utc))
             .or_else(|| fs::metadata(file).and_then(|m| m.modified()).ok().map(DateTime::<Utc>::from))
             .unwrap_or_else(Utc::now);
+        let date = doc
+            .get("date")
+            .filter(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok())
+            // Hand-written notes may have no date; fall back to the last edit.
+            .unwrap_or_else(|| updated.with_timezone(&Local).format("%Y-%m-%d").to_string());
 
         Ok(Note {
             summary: NoteSummary {
@@ -218,6 +225,7 @@ impl FsStore {
                 id: doc.get("id").filter(|id| !id.is_empty()),
                 title,
                 snippet: preview,
+                date,
                 updated: updated.to_rfc3339_opts(SecondsFormat::Secs, true),
                 pinned: doc.get_bool("pinned"),
                 published: doc.get_bool("published"),
@@ -457,11 +465,22 @@ mod tests {
         assert_eq!(plain.title, "From Vim");
         assert_eq!(plain.snippet, "hello");
         assert_eq!(plain.id, None);
+        assert_eq!(plain.date.len(), 10, "falls back to the edit date: {}", plain.date);
 
         store.save("tagged.md", "Tagged", "body 2").unwrap();
         let text = fs::read_to_string(store.root().join("tagged.md")).unwrap();
         assert!(text.contains("tags:\n  - a\n"), "{text}");
         assert!(text.contains("\nid: "), "{text}");
+    }
+
+    #[test]
+    fn the_date_header_is_kept_and_a_bad_one_is_ignored() {
+        let (_dir, store) = store();
+        let header = "updated: 2025-06-01T12:00:00Z";
+        fs::write(store.root().join("dated.md"), format!("---\ndate: 2024-04-02\n{header}\n---\n\n")).unwrap();
+        fs::write(store.root().join("odd.md"), format!("---\ndate: last spring\n{header}\n---\n\n")).unwrap();
+        assert_eq!(store.read("dated.md").unwrap().summary.date, "2024-04-02");
+        assert!(store.read("odd.md").unwrap().summary.date.starts_with("2025-0"));
     }
 
     #[test]
