@@ -47,7 +47,7 @@ Built in this order:
 
 1. **Skeleton** (done). Three panes, folders, autosave, pin, trash, live reload of outside edits.
 2. **Server and publish** (done). The deploy-anywhere server renders published notes as a blog with an RSS feed. The app gets a Publish button that pushes the note to the server and keeps it updated on save.
-3. **Apple Notes basics.** Full-text search (SQLite FTS5 as a rebuildable cache), move notes between folders, rename and delete folders, a view of the trash with restore, images pasted into `_attachments/`, tags, a command palette.
+3. **Apple Notes basics** (in progress). Done: search across all notes, move notes between folders, rename and delete folders, a trash view with restore. Search reads the files directly rather than keeping a SQLite index; add an index only if a real folder proves slow. Still to do: images pasted into `_attachments/`, tags, a command palette, emptying the trash from the app.
 4. **Omarchy polish.** Follow the active Omarchy theme and re-theme when it changes, quick-capture window with a Hyprland rule and keybinding, AUR package and `.desktop` entry.
 5. **Subscriptions.** Reader sign-in, Stripe Checkout with the writer's own keys, subscriber-only posts.
 6. **Sync and accounts.** Sync the whole notes folder through the server, writer accounts, many writers per deployment, Stripe Connect for the hosted service.
