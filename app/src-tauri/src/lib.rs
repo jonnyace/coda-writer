@@ -42,6 +42,11 @@ fn list_notes(store: State<'_, FsStore>, folder: Option<String>) -> CommandResul
 }
 
 #[tauri::command(async)]
+fn search_notes(store: State<'_, FsStore>, query: String) -> CommandResult<Vec<NoteSummary>> {
+    store.search(&query).map_err(err)
+}
+
+#[tauri::command(async)]
 fn read_note(store: State<'_, FsStore>, path: String) -> CommandResult<Note> {
     store.read(&path).map_err(err)
 }
@@ -180,6 +185,7 @@ pub fn run() {
             notes_root,
             list_folders,
             list_notes,
+            search_notes,
             read_note,
             create_note,
             save_note,

@@ -25,6 +25,8 @@ export const api = {
   folders: () => invoke<string[]>('list_folders'),
   /** `null` lists every note; `''` lists notes in the top-level folder. */
   notes: (folder: string | null) => invoke<NoteSummary[]>('list_notes', { folder }),
+  /** Notes in any folder containing every word of `query`. */
+  search: (query: string) => invoke<NoteSummary[]>('search_notes', { query }),
   read: (path: string) => invoke<Note>('read_note', { path }),
   create: (folder: string) => invoke<NoteSummary>('create_note', { folder }),
   save: (path: string, title: string, body: string) =>
