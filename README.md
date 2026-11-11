@@ -5,11 +5,12 @@ A notes app in the spirit of Apple Notes, built for [Omarchy](https://omarchy.or
 ```
 app/          Desktop app: Svelte UI in src/, Tauri shell in src-tauri/
 crates/core/  Note storage (markdown files, folders, trash). No GUI code.
-site/         The blog: build.sh turns site/md/*.md into static HTML
+server/       Blog server for published notes: Cloudflare Workers or Node/Docker
+site/         The original static blog: build.sh turns site/md/*.md into HTML
 docs/         Plan and design notes
 ```
 
-See [docs/plan.md](docs/plan.md) for the roadmap and [site/README.md](site/README.md) for the blog.
+See [docs/plan.md](docs/plan.md) for the roadmap, [server/README.md](server/README.md) to deploy the blog server, and [site/README.md](site/README.md) for the static blog.
 
 ## Run the app
 
