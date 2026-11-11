@@ -10,6 +10,8 @@ use serde::Deserialize;
 pub struct Config {
     /// Folder that holds the notes. `~` expands to the home directory.
     pub notes_dir: Option<String>,
+    /// Blog server to publish to. Publishing is unavailable without it.
+    pub server: Option<crate::publish::Server>,
 }
 
 impl Config {
