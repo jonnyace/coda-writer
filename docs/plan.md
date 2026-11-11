@@ -6,8 +6,29 @@ Coda Writer is a local-first notes app. The notes folder on disk is the source o
 
 - **One repo.** The app, the storage crate and the blog live together so the blog renderer and the app preview can share code.
 - **Publishing is opt-in.** Notes are private. Only notes flagged `published: true` go to the blog.
-- **Multi-user is the goal.** The hosted platform sketched in [idea.md](idea.md) is still where this is heading. The desktop app stays local-first and the hosted service syncs the folder; it does not replace it.
-- **Stack.** Tauri 2 (Rust + system web view), Svelte, Tiptap with markdown output.
+- **Multi-user is the goal.** One server deployment should be able to host many writers. The desktop app stays local-first: the server receives what you publish and, later, syncs your folder. It never replaces the folder.
+- **Deploy anywhere, Cloudflare by default.** The server in `server/` is one TypeScript codebase (Hono) that needs only a SQLite-style database. It runs as a Cloudflare Worker with D1, or under Node with a SQLite file (a Docker image, a VPS, a machine on your tailnet). This replaces the Supabase design in [idea.md](idea.md).
+- **Private notes stay on your machine.** Until sync exists, the server only ever receives notes flagged `published`.
+- **Writers can sell subscriptions.** A post can be marked for subscribers only. See "Subscriptions" below.
+- **Stack.** Desktop: Tauri 2 (Rust + system web view), Svelte, Tiptap with markdown output. Server: Hono, D1 or SQLite, markdown-it.
+
+## Deployment targets
+
+| Target | Database | Notes |
+|---|---|---|
+| Cloudflare (default) | Worker + D1 | Deploys into the writer's own account. Base for the hosted multi-user product. |
+| Self-hosted | Node + SQLite file | Docker image. On a tailnet, `tailscale serve` keeps it private and can supply the user's identity; `tailscale funnel` can expose only the blog. |
+| No server | none | Notes folder synced with git or Syncthing; blog exported as static files from `site/`. |
+
+The app only needs a server address and a token, so it does not care which target is behind it.
+
+## Subscriptions
+
+Readers subscribe to a writer's blog. Posts with `access: subscribers` show a preview to everyone else. The `access` column already exists on the server so no migration is needed.
+
+- **Self-hosted or own Cloudflare account:** the writer adds their own Stripe keys. Stripe Checkout takes the payment, the customer portal handles cancellation, and a webhook records who is subscribed. Money goes straight to the writer.
+- **Hosted multi-user service:** Stripe Connect, so the platform can onboard writers and take a fee. The exact Connect setup is decided when that phase starts.
+- Readers sign in with an emailed link, so the server needs an email sender (Resend or Cloudflare Email Service) before this ships.
 
 ## What multi-user requires of the file format
 
@@ -18,16 +39,19 @@ These are in place from phase 1 so no migration is needed later:
 - Unknown header fields round-trip untouched, so the server can add fields (owner, blog, revision) without older clients destroying them.
 - Deletes go to `.trash/`, which gives sync a tombstone to propagate.
 
-Still open: which backend hosts sync and publishing (Supabase as in idea.md, or Cloudflare D1 + R2), and how conflicts are shown to the user.
+Still open: how sync conflicts are shown to the user, and how one deployment routes many writers (subdomains or paths).
 
 ## Phases
 
+Built in this order:
+
 1. **Skeleton** (done). Three panes, folders, autosave, pin, trash, live reload of outside edits.
-2. **Apple Notes basics.** Full-text search (SQLite FTS5 as a rebuildable cache), move notes between folders, rename and delete folders, a view of the trash with restore, images pasted into `_attachments/`, tags, a command palette.
-3. **Omarchy polish.** Follow the active Omarchy theme and re-theme when it changes, quick-capture window with a Hyprland rule and keybinding, AUR package and `.desktop` entry.
-4. **Publish.** "Publish to blog" sets `published: true` and copies the note into `site/md/`. Replace the awk converter in `site/build.sh` with a Rust renderer (comrak) shared with the app.
-5. **Sync and accounts.** Git autosync of the notes folder first, then the hosted multi-user service.
-6. **macOS.** Native menu bar, signed and notarized `.dmg`, global capture hotkey.
+2. **Server and publish.** The deploy-anywhere server renders published notes as a blog with an RSS feed. The app gets a Publish button that pushes the note to the server and keeps it updated on save.
+3. **Apple Notes basics.** Full-text search (SQLite FTS5 as a rebuildable cache), move notes between folders, rename and delete folders, a view of the trash with restore, images pasted into `_attachments/`, tags, a command palette.
+4. **Omarchy polish.** Follow the active Omarchy theme and re-theme when it changes, quick-capture window with a Hyprland rule and keybinding, AUR package and `.desktop` entry.
+5. **Subscriptions.** Reader sign-in, Stripe Checkout with the writer's own keys, subscriber-only posts.
+6. **Sync and accounts.** Sync the whole notes folder through the server, writer accounts, many writers per deployment, Stripe Connect for the hosted service.
+7. **macOS.** Native menu bar, signed and notarized `.dmg`, global capture hotkey.
 
 ## Known gaps after phase 1
 
