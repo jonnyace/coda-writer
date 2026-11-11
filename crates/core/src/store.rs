@@ -446,15 +446,14 @@ fn match_context(body: &str, lowered: &str, terms: &[String]) -> Option<String> 
     let at = terms.iter().filter_map(|t| lowered.find(t.as_str())).min()?;
     // Count in characters: lowercasing can change byte lengths.
     let start = lowered[..at].chars().count().saturating_sub(LEAD_CHARS);
-    let window: String = body.chars().skip(start).take(SNIPPET_CHARS * 2).collect();
-    let text = window
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    // Drop markdown punctuation first so it leaves no double spaces behind.
+    let window: String = body
         .chars()
-        .filter(|c| !matches!(c, '*' | '_' | '`' | '#'))
-        .take(SNIPPET_CHARS)
-        .collect::<String>();
+        .skip(start)
+        .take(SNIPPET_CHARS * 2)
+        .filter(|c| !matches!(c, '*' | '_' | '`' | '#' | '>'))
+        .collect();
+    let text: String = window.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(SNIPPET_CHARS).collect();
     Some(if start > 0 { format!("…{}", text.trim_start()) } else { text })
 }
 
@@ -547,7 +546,7 @@ mod tests {
             let text = format!("---\ntitle: {title}\nupdated: 2025-01-01T00:00:00Z\n---\n\n{body}");
             fs::write(store.root().join(path), text).unwrap();
         };
-        write("soup.md", "Dinner", &format!("{}Simmer the **Lentil** soup slowly.", "Filler words. ".repeat(20)));
+        write("soup.md", "Dinner", &format!("{}\n\n> Simmer the **Lentil** soup slowly.", "Filler words. ".repeat(20)));
         write("Work/lentils.md", "Lentil prices", "Quarterly report.");
         write("other.md", "Unrelated", "Nothing to see.");
         fs::create_dir_all(store.root().join(".trash")).unwrap();
@@ -562,7 +561,7 @@ mod tests {
 
         let dinner = &store.search("soup").unwrap()[0];
         assert!(dinner.snippet.starts_with('…'), "{}", dinner.snippet);
-        assert!(dinner.snippet.contains("Simmer the Lentil soup"), "{}", dinner.snippet);
+        assert!(dinner.snippet.contains("ds. Simmer the Lentil soup"), "{}", dinner.snippet);
     }
 
     #[test]
