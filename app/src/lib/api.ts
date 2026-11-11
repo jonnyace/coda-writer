@@ -9,6 +9,8 @@ export interface NoteSummary {
   id: string | null
   title: string
   snippet: string
+  /** Day the note was written, `YYYY-MM-DD`. */
+  date: string
   updated: string
   pinned: boolean
   published: boolean
@@ -29,6 +31,11 @@ export const api = {
     invoke<NoteSummary>('save_note', { path, title, body }),
   setPinned: (path: string, value: boolean) =>
     invoke<NoteSummary>('set_note_flag', { path, key: 'pinned', value }),
+  /** Publish to the blog or take down. `url` is the post's address when published. */
+  setPublished: (path: string, value: boolean) =>
+    invoke<{ note: NoteSummary; url: string | null }>('set_published', { path, value }),
+  /** Update the blog copy of a published note; does nothing for private notes. */
+  pushPublished: (path: string) => invoke<string | null>('push_published', { path }),
   trash: (path: string) => invoke<void>('trash_note', { path }),
   createFolder: (name: string) => invoke<string>('create_folder', { name }),
   /** Fires when files in the notes folder change, including edits made outside the app. */

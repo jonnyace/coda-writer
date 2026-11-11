@@ -263,6 +263,11 @@ ul {
   white-space: nowrap;
 }
 
+.published {
+  color: var(--accent);
+  margin-left: 10px;
+}
+
 .sheet {
   flex: 1;
   overflow-y: auto;
@@ -427,6 +432,12 @@ ul {
   padding: 8px 12px;
   position: absolute;
   right: 16px;
+}
+
+.error.notice {
+  border-color: var(--line);
+  color: var(--fg);
+  user-select: text;
 }
 
 @media (max-width: 760px) {
