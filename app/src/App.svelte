@@ -14,7 +14,10 @@
   let loadToken = $state(0)
   let error = $state('')
   let notice = $state('')
-  let newFolderName = $state<string | null>(null)
+  /** The folder-name field under the folder list: making a folder or renaming the selected one. */
+  let folderField = $state<{ mode: 'new' | 'rename'; value: string } | null>(null)
+  /** Showing the trash instead of a folder. Trashed notes are read-only. */
+  let inTrash = $state(false)
   /** Search text. While it is not blank the list shows matches from every folder. */
   let query = $state('')
   const searching = $derived(query.trim() !== '')
@@ -50,10 +53,11 @@
     }
   }
 
-  const listNotes = () => (searching ? api.search(query) : api.notes(folder))
+  const listNotes = () => (inTrash ? api.trashed() : searching ? api.search(query) : api.notes(folder))
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined
   function onSearchInput() {
+    if (inTrash) leaveTrash()
     clearTimeout(searchTimer)
     searchTimer = setTimeout(() => void refresh(), 120)
   }
@@ -75,7 +79,13 @@
     })
   }
 
+  function leaveTrash() {
+    inTrash = false
+    current = null
+  }
+
   async function selectFolder(next: string | null) {
+    if (inTrash) leaveTrash()
     query = ''
     folder = next
     await refresh()
@@ -85,7 +95,7 @@
     if (current?.path === path) return
     await flush()
     await guard(async () => {
-      current = await api.read(path)
+      current = inTrash ? await api.readTrashed(path) : await api.read(path)
       title = current.title
       loadToken += 1
       notice = ''
@@ -94,6 +104,7 @@
 
   async function newNote() {
     await flush()
+    if (inTrash) leaveTrash()
     query = ''
     const created = await guard(() => api.create(folder ?? ''))
     if (!created) return
@@ -145,7 +156,7 @@
   /** Files changed on disk: our own save, or an edit from another program. */
   async function onExternalChange() {
     await refresh()
-    if (!current || dirty || saving) return
+    if (!current || dirty || saving || inTrash) return
     const open = current
     try {
       const fresh = await api.read(open.path)
@@ -196,13 +207,71 @@
     if (next) await open(next.path)
   }
 
-  async function addFolder() {
-    const name = newFolderName?.trim()
-    newFolderName = null
-    if (!name) return
-    const parent = folder ? `${folder}/` : ''
-    const created = await guard(() => api.createFolder(parent + name))
-    if (created) await selectFolder(created)
+  async function showTrash() {
+    await flush()
+    query = ''
+    current = null
+    inTrash = true
+    await refresh()
+  }
+
+  async function restore() {
+    if (!current || !inTrash) return
+    const path = current.path
+    const restored = await guard(() => api.restore(path))
+    if (!restored) return
+    current = null
+    notice = `Restored to ${restored.folder || 'Notes'}`
+    await refresh()
+  }
+
+  async function moveTo(target: string) {
+    if (!current) return
+    await flush()
+    const note = current
+    const moved = await guard(() => api.move(note.path, target))
+    if (moved && current === note) current = { ...moved, body: note.body }
+    await refresh()
+  }
+
+  /** Create a folder inside the selected one, or rename the selected one. */
+  async function submitFolderField() {
+    const field = folderField
+    folderField = null
+    const name = field?.value.trim()
+    if (!field || !name) return
+    if (field.mode === 'new') {
+      const parent = folder ? `${folder}/` : ''
+      const created = await guard(() => api.createFolder(parent + name))
+      if (created) await selectFolder(created)
+      return
+    }
+    const old = folder
+    if (!old) return
+    await flush()
+    const renamed = await guard(() => api.renameFolder(old, name))
+    if (!renamed) return
+    // The open note's path changed along with its folder.
+    if (current && (current.folder === old || current.folder.startsWith(`${old}/`))) {
+      const path = renamed + current.path.slice(old.length)
+      current = (await guard(() => api.read(path))) ?? null
+    }
+    folder = renamed
+    await refresh()
+  }
+
+  async function deleteFolder() {
+    const target = folder
+    if (!target) return
+    await flush()
+    const removed = await guard(() => api.deleteFolder(target))
+    if (removed === undefined) return
+    if (current && (current.folder === target || current.folder.startsWith(`${target}/`))) current = null
+    notice = removed
+      ? 'Folder deleted. Its notes are in the trash.'
+      : 'Notes moved to the trash. The folder still holds other files, so it was kept.'
+    folder = null
+    await refresh()
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -246,15 +315,15 @@
   <nav class="folders" aria-label="Folders">
     <ul>
       <li>
-        <button class:selected={folder === null} onclick={() => selectFolder(null)}>All notes</button>
+        <button class:selected={!inTrash && folder === null} onclick={() => selectFolder(null)}>All notes</button>
       </li>
       <li>
-        <button class:selected={folder === ''} onclick={() => selectFolder('')}>Notes</button>
+        <button class:selected={!inTrash && folder === ''} onclick={() => selectFolder('')}>Notes</button>
       </li>
       {#each folders as path (path)}
         <li>
           <button
-            class:selected={folder === path}
+            class:selected={!inTrash && folder === path}
             style:padding-left="{14 + (folderDepth(path) + 1) * 14}px"
             title={path}
             onclick={() => selectFolder(path)}
@@ -264,28 +333,37 @@
         </li>
       {/each}
     </ul>
-    {#if newFolderName === null}
-      <button class="quiet" onclick={() => (newFolderName = '')}>New folder</button>
+    {#if folderField === null}
+      <button class="quiet" onclick={() => (folderField = { mode: 'new', value: '' })}>New folder</button>
+      {#if folder && !inTrash}
+        <button class="quiet" onclick={() => (folderField = { mode: 'rename', value: folderLabel(folder ?? '') })}>
+          Rename folder
+        </button>
+        <button class="quiet" onclick={deleteFolder} title="Moves the notes in this folder to the trash">
+          Delete folder
+        </button>
+      {/if}
     {:else}
       <!-- svelte-ignore a11y_autofocus -->
       <input
         class="folder-name"
-        aria-label="Folder name"
+        aria-label={folderField.mode === 'new' ? 'New folder name' : 'New name for this folder'}
         placeholder="Folder name"
         autofocus
-        bind:value={newFolderName}
-        onblur={addFolder}
+        bind:value={folderField.value}
+        onblur={submitFolderField}
         onkeydown={(e) => {
-          if (e.key === 'Enter') void addFolder()
-          if (e.key === 'Escape') newFolderName = null
+          if (e.key === 'Enter') void submitFolderField()
+          if (e.key === 'Escape') folderField = null
         }}
       />
     {/if}
+    <button class="quiet trash" class:selected={inTrash} onclick={showTrash}>Trash</button>
   </nav>
 
   <section class="list" aria-label="Notes">
     <header>
-      <h1>{searching ? 'Search results' : folder === null ? 'All notes' : folder === '' ? 'Notes' : folderLabel(folder)}</h1>
+      <h1>{inTrash ? 'Trash' : searching ? 'Search results' : folder === null ? 'All notes' : folder === '' ? 'Notes' : folderLabel(folder)}</h1>
       <button class="new" onclick={newNote} title="New note (Ctrl+N)">New note</button>
     </header>
     <input
@@ -302,7 +380,11 @@
     />
     {#if notes.length === 0}
       <p class="empty">
-        {searching ? `No notes contain "${query.trim()}".` : 'No notes here yet. Press Ctrl+N to write one.'}
+        {inTrash
+          ? 'The trash is empty.'
+          : searching
+            ? `No notes contain "${query.trim()}".`
+            : 'No notes here yet. Press Ctrl+N to write one.'}
       </p>
     {:else}
       <ul>
@@ -330,13 +412,32 @@
         <span class="path" title={current.path}>
           {current.path}{#if current.published}<span class="published">Published</span>{/if}
         </span>
-        <button class="quiet" aria-pressed={current.pinned} onclick={togglePin}>
-          {current.pinned ? 'Unpin' : 'Pin'}
-        </button>
-        <button class="quiet" aria-pressed={current.published} onclick={togglePublished}>
-          {current.published ? 'Unpublish' : 'Publish'}
-        </button>
-        <button class="quiet" onclick={trash}>Move to trash</button>
+        {#if inTrash}
+          <button class="quiet" onclick={restore}>Restore</button>
+        {:else}
+          <select
+            class="quiet move"
+            aria-label="Move to folder"
+            value=""
+            onchange={(e) => {
+              void moveTo(e.currentTarget.value)
+              e.currentTarget.value = ''
+            }}
+          >
+            <option value="" disabled hidden>Move to</option>
+            {#if current.folder !== ''}<option value="">Notes</option>{/if}
+            {#each folders.filter((f) => f !== current?.folder) as path (path)}
+              <option value={path}>{path}</option>
+            {/each}
+          </select>
+          <button class="quiet" aria-pressed={current.pinned} onclick={togglePin}>
+            {current.pinned ? 'Unpin' : 'Pin'}
+          </button>
+          <button class="quiet" aria-pressed={current.published} onclick={togglePublished}>
+            {current.published ? 'Unpublish' : 'Publish'}
+          </button>
+          <button class="quiet" onclick={trash}>Move to trash</button>
+        {/if}
       </div>
       <div class="sheet">
         <input
@@ -345,10 +446,11 @@
           placeholder="Untitled"
           bind:this={titleInput}
           bind:value={title}
+          readonly={inTrash}
           oninput={() => edited()}
           onkeydown={onTitleKeydown}
         />
-        <Editor bind:this={editor} body={current.body} {loadToken} onchange={edited} />
+        <Editor bind:this={editor} body={current.body} {loadToken} editable={!inTrash} onchange={edited} />
       </div>
     {:else}
       <p class="empty">Choose a note, or press Ctrl+N to start a new one.</p>
