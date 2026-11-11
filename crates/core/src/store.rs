@@ -167,7 +167,10 @@ impl FsStore {
         let file = self.resolve_note(path)?;
         let mut doc = Document::parse(&read_file(&file, path)?);
         let title = title.trim();
-        let title_changed = doc.get("title").as_deref() != Some(title);
+        // A note with no `title:` line is titled by its first heading. Compare
+        // against that, so editing only the body does not rename the file.
+        let old_title = doc.get("title").or_else(|| split_title_heading(&doc.body).map(|(heading, _)| heading));
+        let title_changed = old_title.as_deref() != Some(title);
 
         if !doc.has("id") {
             doc.set("id", &new_id());
@@ -343,10 +346,15 @@ impl FsStore {
         let doc = Document::parse(&read_file(file, &rel_str)?);
         let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
-        // Notes written outside the app often have no header at all; their
-        // first heading is the title, so the preview should not repeat it.
-        let heading = if doc.has("title") { None } else { first_heading(&doc.body) };
-        let preview = snippet(&doc.body, heading.is_some());
+        // Notes written outside the app often have no header at all. A
+        // heading on their first line is the title, and is taken out of the
+        // body so the editor does not show it twice. The file itself only
+        // changes when the note is next saved, which writes a `title:` line.
+        let (heading, body) = match split_title_heading(&doc.body) {
+            Some((heading, rest)) if !doc.has("title") => (Some(heading), rest),
+            _ => (None, doc.body.clone()),
+        };
+        let preview = snippet(&body);
         let title = doc.get("title").or(heading).unwrap_or_else(|| stem.to_string());
         let updated = doc
             .get("updated")
@@ -372,7 +380,7 @@ impl FsStore {
                 pinned: doc.get_bool("pinned"),
                 published: doc.get_bool("published"),
             },
-            body: doc.body,
+            body,
         })
     }
 
@@ -545,21 +553,23 @@ pub fn slugify(title: &str) -> String {
     slug.trim_end_matches('-').to_string()
 }
 
-fn first_heading(body: &str) -> Option<String> {
-    body.lines()
-        .find_map(|l| l.strip_prefix("# "))
-        .map(|h| h.trim().to_string())
-        .filter(|h| !h.is_empty())
+/// If the first non-blank line is a `# heading`, return its text and the
+/// body without that line (and the blank line after it).
+fn split_title_heading(body: &str) -> Option<(String, String)> {
+    let start = body.len() - body.trim_start_matches(['\n', '\r']).len();
+    let (line, rest) = body[start..].split_once('\n').unwrap_or((&body[start..], ""));
+    let heading = line.trim_end_matches('\r').strip_prefix("# ")?.trim();
+    if heading.is_empty() {
+        return None;
+    }
+    let rest = rest.strip_prefix("\r\n").or_else(|| rest.strip_prefix('\n')).unwrap_or(rest);
+    Some((heading.to_string(), rest.to_string()))
 }
 
 /// A one-line plain-text preview of the body for the note list.
-fn snippet(body: &str, mut skip_heading: bool) -> String {
+fn snippet(body: &str) -> String {
     let mut out = String::new();
     for line in body.lines() {
-        if skip_heading && line.starts_with("# ") {
-            skip_heading = false;
-            continue;
-        }
         let line = line
             .trim()
             .trim_start_matches(['#', '>', '-', '*', '+', ' '])
@@ -660,6 +670,18 @@ mod tests {
         let plain = notes.iter().find(|n| n.path == "plain.md").unwrap();
         assert_eq!(plain.title, "From Vim");
         assert_eq!(plain.snippet, "hello");
+        assert_eq!(store.read("plain.md").unwrap().body, "hello", "the title heading is not repeated in the body");
+
+        // Saving turns the heading into a `title:` line instead of keeping both.
+        store.save("plain.md", "From Vim", "hello again").unwrap();
+        let text = fs::read_to_string(store.root().join("plain.md")).unwrap();
+        assert!(text.contains("title: From Vim\n") && !text.contains("# From Vim"), "{text}");
+        assert!(store.root().join("plain.md").exists(), "an unchanged title does not rename the file");
+
+        // A heading further down is content, not the title.
+        fs::write(store.root().join("late.md"), "intro\n\n# Section\n").unwrap();
+        let late = store.read("late.md").unwrap();
+        assert_eq!((late.summary.title.as_str(), late.body.as_str()), ("late", "intro\n\n# Section\n"));
         assert_eq!(plain.id, None);
         assert_eq!(plain.date.len(), 10, "falls back to the edit date: {}", plain.date);
 
