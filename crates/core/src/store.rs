@@ -105,6 +105,43 @@ impl FsStore {
         Ok(notes)
     }
 
+    /// Notes whose title or text contains every word of `query`, ignoring
+    /// case. Notes matching in the title come first, then most recent.
+    ///
+    /// This reads every note on each call. That is fast enough for a few
+    /// thousand notes and needs no index that could go stale; add one only
+    /// if a real notes folder proves too slow.
+    pub fn search(&self, query: &str) -> Result<Vec<NoteSummary>> {
+        let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut files = Vec::new();
+        self.collect_notes(&self.root, true, &mut files)?;
+
+        let mut hits: Vec<(bool, NoteSummary)> = Vec::new();
+        for note in files.iter().filter_map(|file| self.load(file).ok()) {
+            let title = note.summary.title.to_lowercase();
+            let body = note.body.to_lowercase();
+            if !terms.iter().all(|t| title.contains(t) || body.contains(t)) {
+                continue;
+            }
+            let in_title = terms.iter().all(|t| title.contains(t));
+            let mut summary = note.summary;
+            if let Some(context) = match_context(&note.body, &body, &terms) {
+                summary.snippet = context;
+            }
+            hits.push((in_title, summary));
+        }
+        hits.sort_by(|(a_title, a), (b_title, b)| {
+            b_title
+                .cmp(a_title)
+                .then_with(|| b.updated.cmp(&a.updated))
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        Ok(hits.into_iter().map(|(_, summary)| summary).collect())
+    }
+
     pub fn read(&self, path: &str) -> Result<Note> {
         self.load(&self.resolve_note(path)?)
     }
@@ -402,6 +439,24 @@ fn snippet(body: &str, mut skip_heading: bool) -> String {
     out.chars().take(SNIPPET_CHARS).collect()
 }
 
+/// The text around the first place a search word appears in the body, so
+/// the result list shows why the note matched.
+fn match_context(body: &str, lowered: &str, terms: &[String]) -> Option<String> {
+    const LEAD_CHARS: usize = 30;
+    let at = terms.iter().filter_map(|t| lowered.find(t.as_str())).min()?;
+    // Count in characters: lowercasing can change byte lengths.
+    let start = lowered[..at].chars().count().saturating_sub(LEAD_CHARS);
+    // Drop markdown punctuation first so it leaves no double spaces behind.
+    let window: String = body
+        .chars()
+        .skip(start)
+        .take(SNIPPET_CHARS * 2)
+        .filter(|c| !matches!(c, '*' | '_' | '`' | '#' | '>'))
+        .collect();
+    let text: String = window.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(SNIPPET_CHARS).collect();
+    Some(if start > 0 { format!("…{}", text.trim_start()) } else { text })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,6 +536,32 @@ mod tests {
         fs::write(store.root().join("odd.md"), format!("---\ndate: last spring\n{header}\n---\n\n")).unwrap();
         assert_eq!(store.read("dated.md").unwrap().summary.date, "2024-04-02");
         assert!(store.read("odd.md").unwrap().summary.date.starts_with("2025-0"));
+    }
+
+    #[test]
+    fn search_matches_every_word_in_title_or_body_across_folders() {
+        let (_dir, store) = store();
+        store.create_folder("Work").unwrap();
+        let write = |path: &str, title: &str, body: &str| {
+            let text = format!("---\ntitle: {title}\nupdated: 2025-01-01T00:00:00Z\n---\n\n{body}");
+            fs::write(store.root().join(path), text).unwrap();
+        };
+        write("soup.md", "Dinner", &format!("{}\n\n> Simmer the **Lentil** soup slowly.", "Filler words. ".repeat(20)));
+        write("Work/lentils.md", "Lentil prices", "Quarterly report.");
+        write("other.md", "Unrelated", "Nothing to see.");
+        fs::create_dir_all(store.root().join(".trash")).unwrap();
+        fs::write(store.root().join(".trash/gone.md"), "lentil").unwrap();
+
+        let titles = |q: &str| store.search(q).unwrap().into_iter().map(|n| n.title).collect::<Vec<_>>();
+        assert_eq!(titles("LENTIL"), ["Lentil prices", "Dinner"], "title matches first, trash excluded");
+        assert_eq!(titles("soup lentil"), ["Dinner"]);
+        assert_eq!(titles("lentil report"), ["Lentil prices"], "words may be split between title and body");
+        assert!(titles("lentil unicorn").is_empty());
+        assert!(titles("   ").is_empty());
+
+        let dinner = &store.search("soup").unwrap()[0];
+        assert!(dinner.snippet.starts_with('…'), "{}", dinner.snippet);
+        assert!(dinner.snippet.contains("ds. Simmer the Lentil soup"), "{}", dinner.snippet);
     }
 
     #[test]

@@ -15,8 +15,12 @@
   let error = $state('')
   let notice = $state('')
   let newFolderName = $state<string | null>(null)
+  /** Search text. While it is not blank the list shows matches from every folder. */
+  let query = $state('')
+  const searching = $derived(query.trim() !== '')
 
   let titleInput = $state<HTMLInputElement>()
+  let searchInput = $state<HTMLInputElement>()
   let editor = $state<Editor>()
 
   // Edits not yet written to disk. `null` body means only the title changed.
@@ -46,15 +50,33 @@
     }
   }
 
+  const listNotes = () => (searching ? api.search(query) : api.notes(folder))
+
+  let searchTimer: ReturnType<typeof setTimeout> | undefined
+  function onSearchInput() {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => void refresh(), 120)
+  }
+
+  function clearSearch() {
+    query = ''
+    void refresh()
+  }
+
+  // Refreshes overlap while typing a search; only the newest may fill the list.
+  let refreshCount = 0
   async function refresh() {
+    const mine = ++refreshCount
     await guard(async () => {
       folders = await api.folders()
       if (folder && !folders.includes(folder)) folder = null
-      notes = await api.notes(folder)
+      const listed = await listNotes()
+      if (mine === refreshCount) notes = listed
     })
   }
 
   async function selectFolder(next: string | null) {
+    query = ''
     folder = next
     await refresh()
   }
@@ -72,6 +94,7 @@
 
   async function newNote() {
     await flush()
+    query = ''
     const created = await guard(() => api.create(folder ?? ''))
     if (!created) return
     await refresh()
@@ -102,7 +125,7 @@
         const summary = await api.save(note.path, savedTitle, body)
         error = ''
         if (current === note) current = { ...summary, body }
-        notes = await api.notes(folder)
+        notes = await listNotes()
         if (summary.published) {
           // The note is safe on disk either way; only the blog copy is stale.
           api.pushPublished(summary.path).catch((e) => (error = `Saved, but the blog was not updated: ${e}`))
@@ -183,9 +206,14 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'n') {
+    const command = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey
+    if (command && event.key.toLowerCase() === 'n') {
       event.preventDefault()
       void newNote()
+    } else if (command && event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      searchInput?.focus()
+      searchInput?.select()
     }
   }
 
@@ -257,11 +285,25 @@
 
   <section class="list" aria-label="Notes">
     <header>
-      <h1>{folder === null ? 'All notes' : folder === '' ? 'Notes' : folderLabel(folder)}</h1>
+      <h1>{searching ? 'Search results' : folder === null ? 'All notes' : folder === '' ? 'Notes' : folderLabel(folder)}</h1>
       <button class="new" onclick={newNote} title="New note (Ctrl+N)">New note</button>
     </header>
+    <input
+      class="search"
+      type="search"
+      aria-label="Search notes"
+      placeholder="Search all notes (Ctrl+F)"
+      bind:this={searchInput}
+      bind:value={query}
+      oninput={onSearchInput}
+      onkeydown={(e) => {
+        if (e.key === 'Escape') clearSearch()
+      }}
+    />
     {#if notes.length === 0}
-      <p class="empty">No notes here yet. Press Ctrl+N to write one.</p>
+      <p class="empty">
+        {searching ? `No notes contain "${query.trim()}".` : 'No notes here yet. Press Ctrl+N to write one.'}
+      </p>
     {:else}
       <ul>
         {#each notes as note (note.path)}
