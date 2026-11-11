@@ -66,16 +66,60 @@ fn set_note_flag(store: State<'_, FsStore>, path: String, key: String, value: bo
     store.set_flag(&path, &key, value).map_err(err)
 }
 
+/// A note leaving the notes folder must not stay live on the blog. If it
+/// cannot be taken down the caller stops, so the user can see it is still
+/// published.
+fn take_down(store: &FsStore, publisher: &Publisher, note: &NoteSummary) -> CommandResult<()> {
+    if let (true, Some(id), Some(server)) = (note.published, note.id.as_deref(), publisher.0.as_ref()) {
+        server.remove(id)?;
+        store.set_flag(&note.path, "published", false).map_err(err)?;
+    }
+    Ok(())
+}
+
 #[tauri::command(async)]
 fn trash_note(store: State<'_, FsStore>, publisher: State<'_, Publisher>, path: String) -> CommandResult<()> {
-    // A trashed note must not stay live on the blog. If it cannot be taken
-    // down, keep the note so the user can see it is still published.
     let note = store.read(&path).map_err(err)?.summary;
-    if let (true, Some(id), Some(server)) = (note.published, note.id, publisher.0.as_ref()) {
-        server.remove(&id)?;
-        store.set_flag(&path, "published", false).map_err(err)?;
-    }
+    take_down(&store, &publisher, &note)?;
     store.trash(&path).map_err(err)
+}
+
+#[tauri::command(async)]
+fn list_trash(store: State<'_, FsStore>) -> CommandResult<Vec<NoteSummary>> {
+    store.trashed().map_err(err)
+}
+
+#[tauri::command(async)]
+fn read_trashed(store: State<'_, FsStore>, path: String) -> CommandResult<Note> {
+    store.read_trashed(&path).map_err(err)
+}
+
+#[tauri::command(async)]
+fn restore_note(store: State<'_, FsStore>, path: String) -> CommandResult<NoteSummary> {
+    store.restore(&path).map_err(err)
+}
+
+#[tauri::command(async)]
+fn move_note(store: State<'_, FsStore>, path: String, folder: String) -> CommandResult<NoteSummary> {
+    store.move_note(&path, &folder).map_err(err)
+}
+
+#[tauri::command(async)]
+fn rename_folder(store: State<'_, FsStore>, folder: String, name: String) -> CommandResult<String> {
+    store.rename_folder(&folder, &name).map_err(err)
+}
+
+/// Trash a folder's notes and remove it. Returns `false` if the folder was
+/// kept because it still holds files that are not notes.
+#[tauri::command(async)]
+fn delete_folder(store: State<'_, FsStore>, publisher: State<'_, Publisher>, folder: String) -> CommandResult<bool> {
+    let inside = format!("{folder}/");
+    for note in store.notes(None).map_err(err)? {
+        if note.folder == folder || note.folder.starts_with(&inside) {
+            take_down(&store, &publisher, &note)?;
+        }
+    }
+    store.delete_folder(&folder).map_err(err)
 }
 
 #[tauri::command(async)]
@@ -192,6 +236,12 @@ pub fn run() {
             set_note_flag,
             trash_note,
             create_folder,
+            list_trash,
+            read_trashed,
+            restore_note,
+            move_note,
+            rename_folder,
+            delete_folder,
             set_published,
             push_published,
         ])
