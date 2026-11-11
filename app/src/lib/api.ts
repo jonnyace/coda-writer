@@ -40,6 +40,15 @@ export const api = {
   pushPublished: (path: string) => invoke<string | null>('push_published', { path }),
   trash: (path: string) => invoke<void>('trash_note', { path }),
   createFolder: (name: string) => invoke<string>('create_folder', { name }),
+  /** Trashed notes. `path` is relative to the trash; `folder` is where it would be restored. */
+  trashed: () => invoke<NoteSummary[]>('list_trash'),
+  readTrashed: (path: string) => invoke<Note>('read_trashed', { path }),
+  restore: (path: string) => invoke<NoteSummary>('restore_note', { path }),
+  move: (path: string, folder: string) => invoke<NoteSummary>('move_note', { path, folder }),
+  /** Returns the folder's new path. */
+  renameFolder: (folder: string, name: string) => invoke<string>('rename_folder', { folder, name }),
+  /** Trashes the folder's notes. Resolves `false` if the folder was kept because other files remain. */
+  deleteFolder: (folder: string) => invoke<boolean>('delete_folder', { folder }),
   /** Fires when files in the notes folder change, including edits made outside the app. */
   onChanged: (handler: () => void) => listen('notes-changed', handler),
 }
